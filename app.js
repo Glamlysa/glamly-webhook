@@ -8,8 +8,8 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(cors());
 
-const accountSid = "YOUR_ACCOUNT_SID";
-const authToken  = "YOUR_AUTH_TOKEN";
+const accountSid = process.env.ACCOUNT_SID;
+const authToken  = process.env.AUTH_TOKEN;
 const client     = twilio(accountSid, authToken);
 const fromNumber = "whatsapp:+966534864736";
 
