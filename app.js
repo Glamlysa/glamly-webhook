@@ -20,41 +20,41 @@ const JWT_SECRET  = process.env.JWT_SECRET  || "glamly_secret_2026";
 const DASH_PASS   = process.env.DASHBOARD_PASSWORD || "glamly123";
 
 // ── Database connection ──────────────────────────────────────────
-let db;
 async function connectDB() {
-  db = await mysql.createPool({
-    host:     process.env.DB_HOST,
-    user:     process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 10
-  });
+  try {
+    db = await mysql.createPool({
+      uri: process.env.DATABASE_URL,
+      waitForConnections: true,
+      connectionLimit: 10
+    });
 
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS conversations (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      phone VARCHAR(50) UNIQUE NOT NULL,
-      status VARCHAR(20) DEFAULT 'bot',
-      assigned_to VARCHAR(100),
-      last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS conversations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        phone VARCHAR(50) UNIQUE NOT NULL,
+        status VARCHAR(20) DEFAULT 'bot',
+        assigned_to VARCHAR(100),
+        last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      phone VARCHAR(50) NOT NULL,
-      sender VARCHAR(20) NOT NULL,
-      message TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        phone VARCHAR(50) NOT NULL,
+        sender VARCHAR(20) NOT NULL,
+        message TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
-  console.log("Database connected!");
+    console.log("Database connected!");
+  } catch (err) {
+    console.error("Database connection failed:", err.message);
+    process.exit(1);
+  }
 }
-connectDB();
 
 // ── Auth middleware ──────────────────────────────────────────────
 function requireAuth(req, res, next) {
