@@ -247,25 +247,9 @@ app.post("/create-gift", async (req, res) => {
         "4": giftLink
       })
     });
-app.get("/gift/:code", async (req, res) => {
-  const { code } = req.params;
-
-  try {
-    const [rows] = await db.execute(
-      `SELECT * FROM gifts WHERE gift_code = ?`,
-      [code]
-    );
-
-    if (rows.length === 0) {
-      return res.send(`<!DOCTYPE html>
-<html><head><meta charset="UTF-8">
-<style>body{background:#0F0A28;color:#E8DEFF;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center}</style>
-</head><body><h2>هذه الهدية غير موجودة</h2><p>Gift not found</p></body></html>`);
-    }
-
-    const gift = rows[0];
-
-    res.send(`<!DOCTYPE html>
+app.get("/gift", (req, res) => {
+  const code = req.query.code || '';
+  res.send(`<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
@@ -279,23 +263,12 @@ body{font-family:'Noto Naskh Arabic',sans-serif;background:#0F0A28;min-height:10
 .brand{color:#E8DEFF;font-size:24px;font-weight:700;letter-spacing:4px;font-family:sans-serif}
 .tagline{color:#C8A84B;font-size:11px;font-family:sans-serif;margin-bottom:24px}
 .gift-emoji{font-size:64px;margin:16px 0}
-.from{color:#9F7FEA;font-size:14px;margin-bottom:6px}
-.from span{color:#C8A84B;font-weight:700}
-h1{color:#FFFFFF;font-size:22px;margin-bottom:20px;line-height:1.5}
-.divider{width:80%;height:1px;background:#2D1B6E;margin:20px auto}
-.detail-box{background:#2D1B6E;border-radius:14px;padding:16px;margin-bottom:20px;text-align:right}
-.detail-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #3D2580}
-.detail-row:last-child{border-bottom:none}
-.detail-label{color:#9F7FEA;font-size:13px}
-.detail-value{color:#E8DEFF;font-size:14px;font-weight:600}
-.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px;border-radius:14px;font-size:16px;font-weight:700;text-decoration:none;margin-bottom:12px;transition:opacity 0.2s;font-family:'Noto Naskh Arabic',sans-serif}
-.btn:hover{opacity:0.9}
+h1{color:#FFFFFF;font-size:20px;margin-bottom:10px;line-height:1.5}
+p{color:#9F7FEA;font-size:14px;margin-bottom:24px;line-height:1.7}
+input{width:100%;padding:14px;border-radius:12px;border:1px solid #3D2580;background:#2D1B6E;color:#E8DEFF;font-size:18px;text-align:center;font-family:'Noto Naskh Arabic',sans-serif;outline:none;letter-spacing:4px;margin-bottom:12px}
+input::placeholder{color:#534AB7;letter-spacing:0}
+.btn{display:block;width:100%;padding:16px;border-radius:14px;font-size:16px;font-weight:700;text-decoration:none;margin-bottom:12px;cursor:pointer;border:none;font-family:'Noto Naskh Arabic',sans-serif}
 .btn-main{background:#C8A84B;color:#0F0A28}
-.btn-apple{background:#FFFFFF;color:#000000;font-size:14px}
-.btn-android{background:#1D9E75;color:#FFFFFF;font-size:14px}
-.status{display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;margin-bottom:16px}
-.status.pending{background:#C8A84B22;color:#C8A84B;border:1px solid #C8A84B}
-.status.used{background:#1D9E7522;color:#1D9E75;border:1px solid #1D9E75}
 .footer{color:#3D2870;font-size:11px;margin-top:20px;font-family:sans-serif}
 </style>
 </head>
@@ -303,58 +276,31 @@ h1{color:#FFFFFF;font-size:22px;margin-bottom:20px;line-height:1.5}
 <div class="card">
   <div class="brand">GLAMLY</div>
   <div class="tagline">where beauty made ease</div>
-  
   <div class="gift-emoji">🎁</div>
-  
-  <div class="from">أهدتكِ <span>${gift.sender_name}</span> هدية مميزة!</div>
-  <h1>تجربة تجميل فاخرة بانتظاركِ ✨</h1>
-  
-  <span class="status ${gift.status === 'used' ? 'used' : 'pending'}">
-    ${gift.status === 'used' ? '✅ تم الاستخدام' : '🎀 لم تُستخدم بعد'}
-  </span>
-
-  <div class="divider"></div>
-
-  <div class="detail-box">
-    <div class="detail-row">
-      <span class="detail-value">${gift.service_name}</span>
-      <span class="detail-label">✨ الخدمة</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-value">${gift.salon_name}</span>
-      <span class="detail-label">📍 المكان</span>
-    </div>
-    <div class="detail-row">
-      <span class="detail-value">${new Date(gift.created_at).toLocaleDateString('ar-SA')}</span>
-      <span class="detail-label">📅 تاريخ الهدية</span>
-    </div>
-  </div>
-
-  <a href="glamly://gift/${gift.gift_code}" class="btn btn-main">
-    🗓️ احجزي موعدكِ الآن
-  </a>
-
-  <p style="color:#534AB7;font-size:12px;margin-bottom:12px">
-    إذا لم يكن التطبيق مثبتاً لديكِ، حمّليه من هنا:
-  </p>
-
-  <a href="${process.env.APPLE_STORE_URL || 'https://apps.apple.com'}" class="btn btn-apple">
-    🍎 App Store
-  </a>
-  <a href="${process.env.GOOGLE_PLAY_URL || 'https://play.google.com'}" class="btn btn-android">
-    🤖 Google Play
-  </a>
-
+  <h1>أدخلي رمز هديتكِ</h1>
+  <p>ستجدين الرمز في رسالة WhatsApp التي وصلتكِ</p>
+  <input type="text" id="codeInput" placeholder="مثال: ABC12345" maxlength="8" oninput="this.value=this.value.toUpperCase()">
+  <button class="btn btn-main" onclick="openGift()">🎀 عرض هديتكِ</button>
   <div class="footer">Glamly – حيث يصبح الجمال أمراً سهلاً</div>
 </div>
-
 <script>
-  setTimeout(function(){
-    window.location.href = "glamly://gift/${gift.gift_code}";
-  }, 500);
+  const preCode = "${code}";
+  if(preCode) {
+    document.getElementById('codeInput').value = preCode;
+    window.location.href = '/gift/' + preCode;
+  }
+  function openGift(){
+    const code = document.getElementById('codeInput').value.trim();
+    if(!code){ alert('من فضلكِ أدخلي الرمز'); return; }
+    window.location.href = '/gift/' + code;
+  }
+  document.getElementById('codeInput').addEventListener('keydown', function(e){
+    if(e.key === 'Enter') openGift();
+  });
 </script>
 </body>
 </html>`);
+});
 
   } catch (err) {
     res.status(500).json({ error: err.message });
