@@ -19,7 +19,7 @@ const fromNumber  = "whatsapp:+966534864736";
 const JWT_SECRET  = process.env.JWT_SECRET  || "glamly_secret_2026";
 const DASH_PASS   = process.env.DASHBOARD_PASSWORD || "glamly123";
 
-// ── Database connection ──────────────────────────────────────────
+let db;
 async function connectDB() {
   try {
     db = await mysql.createPool({
@@ -27,7 +27,6 @@ async function connectDB() {
       waitForConnections: true,
       connectionLimit: 10
     });
-
     await db.execute(`
       CREATE TABLE IF NOT EXISTS conversations (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -38,7 +37,6 @@ async function connectDB() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
-
     await db.execute(`
       CREATE TABLE IF NOT EXISTS messages (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -48,15 +46,14 @@ async function connectDB() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
-
     console.log("Database connected!");
   } catch (err) {
     console.error("Database connection failed:", err.message);
     process.exit(1);
   }
 }
+connectDB();
 
-// ── Auth middleware ──────────────────────────────────────────────
 function requireAuth(req, res, next) {
   const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).json({ error: "Unauthorized" });
@@ -68,36 +65,26 @@ function requireAuth(req, res, next) {
   }
 }
 
-// ── Bot logic ────────────────────────────────────────────────────
 function getBotReply(message) {
   const msg = message.toLowerCase().trim();
-
   if (msg === "1" || msg.includes("booking") || msg.includes("status") || msg.includes("حجز") || msg.includes("حالة"))
     return "📋 Please share your booking ID and we will check it for you!\n\nأرسل رقم حجزك وسنتحقق منه فوراً!";
-
   if (msg === "2" || msg.includes("cancel") || msg.includes("إلغاء") || msg.includes("الغ"))
     return "❌ To cancel your booking please share your booking ID.\n\nCancellations made 24hrs before are fully refunded.\n\nلإلغاء حجزك أرسل رقم الحجز.\nالإلغاء قبل 24 ساعة يحصل على استرداد كامل.";
-
   if (msg === "3" || msg.includes("price") || msg.includes("سعر") || msg.includes("كم") || msg.includes("تكلفة"))
     return "💰 Browse all prices in the Glamly app!\n\nglamlysa.com\n\nتصفح جميع الأسعار في تطبيق Glamly!\nglamlysa.com";
-
   if (msg === "4" || msg.includes("agent") || msg.includes("human") || msg.includes("موظف") || msg.includes("مساعدة"))
     return "👩‍💼 Connecting you to an agent now. Please wait!\n\nجاري تحويلك لموظف. لحظة من فضلك!";
-
   if (msg.includes("hello") || msg.includes("hi") || msg.includes("مرحبا") || msg.includes("هلا") || msg.includes("اهلا") || msg.includes("السلام"))
     return "👋 Welcome to Glamly — where beauty made ease!\nأهلاً بك في Glamly!\n\n1️⃣ Booking status · حالة الحجز\n2️⃣ Cancel booking · إلغاء الحجز\n3️⃣ Prices · الأسعار\n4️⃣ Talk to agent · التحدث مع موظف";
-
   if (msg.includes("thank") || msg.includes("شكر") || msg.includes("شكراً"))
     return "🌸 You're most welcome!\nعلى الرحب والسعة!\n\nGlamly — where beauty made ease 💜";
-
   return null;
 }
 
-// ── Webhook ──────────────────────────────────────────────────────
 app.post("/webhook", async (req, res) => {
   const from    = req.body.From;
   const message = req.body.Body;
-
   try {
     await db.execute(
       `INSERT INTO conversations (phone, status, last_seen)
@@ -105,14 +92,11 @@ app.post("/webhook", async (req, res) => {
        ON DUPLICATE KEY UPDATE last_seen = NOW()`,
       [from]
     );
-
     await db.execute(
       `INSERT INTO messages (phone, sender, message) VALUES (?, 'customer', ?)`,
       [from, message]
     );
-
     const botReply = getBotReply(message);
-
     if (botReply) {
       await db.execute(
         `INSERT INTO messages (phone, sender, message) VALUES (?, 'bot', ?)`,
@@ -130,18 +114,27 @@ app.post("/webhook", async (req, res) => {
       );
     }
   } catch (err) {
-    console.error("Webhook error:", err);
+    console.error("Webhook error:", err.message);
   }
-
   res.status(200).send("OK");
 });
 
-// ── API: conversations ───────────────────────────────────────────
+app.post("/login", (req, res) => {
+  const { password } = req.body;
+  if (password !== DASH_PASS) return res.status(401).json({ error: "Wrong password" });
+  const token = jwt.sign({ role: "agent" }, JWT_SECRET, { expiresIn: "24h" });
+  res.cookie("token", token, { httpOnly: true, maxAge: 86400000 });
+  res.json({ success: true, token });
+});
+
+app.post("/logout", (req, res) => {
+  res.clearCookie("token");
+  res.json({ success: true });
+});
+
 app.get("/conversations", requireAuth, async (req, res) => {
   try {
-    const [convs] = await db.execute(
-      `SELECT * FROM conversations ORDER BY last_seen DESC`
-    );
+    const [convs] = await db.execute(`SELECT * FROM conversations ORDER BY last_seen DESC`);
     const result = {};
     for (const conv of convs) {
       const [msgs] = await db.execute(
@@ -152,11 +145,7 @@ app.get("/conversations", requireAuth, async (req, res) => {
         status:     conv.status,
         assignedTo: conv.assigned_to,
         lastSeen:   conv.last_seen,
-        messages:   msgs.map(m => ({
-          from:    m.sender,
-          message: m.message,
-          time:    m.created_at
-        }))
+        messages:   msgs.map(m => ({ from: m.sender, message: m.message, time: m.created_at }))
       };
     }
     res.json(result);
@@ -165,7 +154,6 @@ app.get("/conversations", requireAuth, async (req, res) => {
   }
 });
 
-// ── API: agent reply ─────────────────────────────────────────────
 app.post("/reply", requireAuth, async (req, res) => {
   const { to, message } = req.body;
   const fullNumber = `whatsapp:+${to}`;
@@ -185,25 +173,19 @@ app.post("/reply", requireAuth, async (req, res) => {
   }
 });
 
-// ── API: update status ───────────────────────────────────────────
 app.post("/status", requireAuth, async (req, res) => {
   const { number, status } = req.body;
   try {
-    await db.execute(
-      `UPDATE conversations SET status = ? WHERE phone = ?`,
-      [status, number]
-    );
+    await db.execute(`UPDATE conversations SET status = ? WHERE phone = ?`, [status, number]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── API: booking lookup ──────────────────────────────────────────
 app.get("/booking/:id", requireAuth, async (req, res) => {
-  const bookingId = req.params.id;
   res.json({
-    id:       bookingId,
+    id:       req.params.id,
     customer: "Connect to your Glamly database",
     service:  "to show real booking data",
     date:     "here",
@@ -211,38 +193,15 @@ app.get("/booking/:id", requireAuth, async (req, res) => {
   });
 });
 
-// ── Login ────────────────────────────────────────────────────────
-app.post("/login", (req, res) => {
-  const { password } = req.body;
-  if (password !== DASH_PASS) return res.status(401).json({ error: "Wrong password" });
-  const token = jwt.sign({ role: "agent" }, JWT_SECRET, { expiresIn: "12h" });
-  res.cookie("token", token, { httpOnly: true, maxAge: 43200000 });
-  res.json({ success: true, token });
-});
-
-app.post("/logout", (req, res) => {
-  res.clearCookie("token");
-  res.json({ success: true });
-});
-
-// ── Gift notification ────────────────────────────────────────────
 app.post("/send-gift", async (req, res) => {
   const { recipientPhone, senderName, serviceName, salonName, bookingLink, language } = req.body;
-  const templateSid = language === "ar"
-    ? process.env.TEMPLATE_SID_AR
-    : process.env.TEMPLATE_SID_EN;
-
+  const templateSid = language === "ar" ? process.env.TEMPLATE_SID_AR : process.env.TEMPLATE_SID_EN;
   try {
     await client.messages.create({
-      from:        fromNumber,
-      to:          `whatsapp:+${recipientPhone}`,
-      contentSid:  templateSid,
-      contentVariables: JSON.stringify({
-        "1": senderName,
-        "2": serviceName,
-        "3": salonName,
-        "4": bookingLink
-      })
+      from:             fromNumber,
+      to:               `whatsapp:+${recipientPhone}`,
+      contentSid:       templateSid,
+      contentVariables: JSON.stringify({ "1": senderName, "2": serviceName, "3": salonName, "4": bookingLink })
     });
     res.json({ success: true });
   } catch (err) {
@@ -250,7 +209,6 @@ app.post("/send-gift", async (req, res) => {
   }
 });
 
-// ── Dashboard ────────────────────────────────────────────────────
 app.get("/dashboard", (req, res) => {
   res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -268,7 +226,7 @@ body{font-family:sans-serif;background:#f0eef8;height:100vh;overflow:hidden;disp
 .login-box p{color:#9F7FEA;font-size:13px;margin-bottom:24px}
 .login-box input{width:100%;padding:10px 14px;border-radius:8px;border:1px solid #534AB7;background:#1E1040;color:#E8DEFF;font-size:14px;outline:none;margin-bottom:12px}
 .login-box button{width:100%;padding:11px;background:#C8A84B;color:#1A0E3D;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
-.login-box .err{color:#F09595;font-size:12px;margin-top:8px}
+.login-err{color:#F09595;font-size:12px;margin-top:8px}
 .app{display:none;flex-direction:column;height:100vh}
 .topbar{background:#1E1040;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .brand{color:#E8DEFF;font-size:16px;font-weight:600;letter-spacing:1px}
@@ -330,7 +288,7 @@ body{font-family:sans-serif;background:#f0eef8;height:100vh;overflow:hidden;disp
 .qr{padding:5px 12px;border-radius:14px;font-size:11px;border:1px solid #ddd;background:white;color:#555;cursor:pointer;white-space:nowrap}
 .qr:hover{background:#EEEDFE;border-color:#9F7FEA;color:#534AB7}
 .reply-box{padding:10px 14px;border-top:1px solid #eee;display:flex;gap:8px;align-items:center;background:white;flex-shrink:0}
-.reply-box textarea{flex:1;padding:8px 14px;border:1px solid #ddd;border-radius:10px;font-size:13px;background:#fafafa;color:#333;outline:none;resize:none;height:40px;font-family:sans-serif}
+.reply-box textarea{flex:1;padding:8px 14px;border:1px solid #ddd;border-radius:10px;font-size:13px;background:#fafafa;color:#333;outline:none;resize:none;height:40px;font-family:sans-serif;transition:border 0.2s}
 .reply-box textarea:focus{border-color:#7C5FD4;height:72px}
 .send-btn{padding:8px 18px;background:#2D1B6E;color:#E8DEFF;border:none;border-radius:10px;font-size:13px;cursor:pointer}
 .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#aaa;gap:8px}
@@ -346,34 +304,34 @@ body{font-family:sans-serif;background:#f0eef8;height:100vh;overflow:hidden;disp
   <div class="login-box">
     <h2>GLAMLY</h2>
     <p>Support Dashboard · لوحة دعم العملاء</p>
-    <input type="password" id="passInput" placeholder="Enter password · كلمة المرور" onkeydown="if(event.key==='Enter')doLogin()">
+    <input type="password" id="passInput" placeholder="Password · كلمة المرور" onkeydown="if(event.key==='Enter')doLogin()">
     <button onclick="doLogin()">Login · دخول</button>
-    <div class="err" id="loginErr"></div>
+    <div class="login-err" id="loginErr"></div>
   </div>
 </div>
 
 <div class="app" id="app">
   <div class="topbar">
-    <div class="brand">GLAMLY Support<span>where beauty made ease</span></div>
+    <div class="brand">GLAMLY Support<span>where beauty made ease · حيث يصبح الجمال أمراً سهلاً</span></div>
     <div class="top-right">
       <div class="lang-toggle">
         <button class="lang-btn active" onclick="setLang('en')">EN</button>
         <button class="lang-btn" onclick="setLang('ar')">ع</button>
       </div>
-      <button class="logout-btn" onclick="doLogout()">Logout</button>
+      <button class="logout-btn" onclick="doLogout()">Logout · خروج</button>
     </div>
   </div>
   <div class="stats-bar">
     <div class="stat"><div class="stat-n" id="s-total">0</div><div class="stat-l" id="l-total">Total</div></div>
-    <div class="stat"><div class="stat-n" style="color:#C8A84B" id="s-pending">0</div><div class="stat-l" id="l-pending">Pending</div></div>
-    <div class="stat"><div class="stat-n" style="color:#1D9E75" id="s-bot">0</div><div class="stat-l" id="l-bot">Bot handled</div></div>
-    <div class="stat"><div class="stat-n" style="color:#9F7FEA" id="s-resolved">0</div><div class="stat-l" id="l-resolved">Resolved</div></div>
+    <div class="stat"><div class="stat-n" style="color:#C8A84B" id="s-pending">0</div><div class="stat-l">Pending</div></div>
+    <div class="stat"><div class="stat-n" style="color:#1D9E75" id="s-bot">0</div><div class="stat-l">Bot handled</div></div>
+    <div class="stat"><div class="stat-n" style="color:#9F7FEA" id="s-resolved">0</div><div class="stat-l">Resolved</div></div>
   </div>
   <div class="main">
     <div class="sidebar">
       <div class="filter-row">
         <button class="f-btn active" onclick="setFilter('all',this)">All</button>
-        <button class="f-btn" onclick="setFilter('pending',this)" id="f-pending">Pending</button>
+        <button class="f-btn" onclick="setFilter('pending',this)">Pending</button>
         <button class="f-btn" onclick="setFilter('bot',this)">Bot</button>
         <button class="f-btn" onclick="setFilter('resolved',this)">Resolved</button>
       </div>
@@ -381,13 +339,14 @@ body{font-family:sans-serif;background:#f0eef8;height:100vh;overflow:hidden;disp
       <div class="conv-list" id="convList"></div>
     </div>
     <div class="chat-area" id="chatArea">
-      <div class="empty-state"><div class="big">💬</div><p id="empty-msg">Select a conversation</p></div>
+      <div class="empty-state"><div class="big">💬</div><p>Select a conversation</p></div>
     </div>
   </div>
 </div>
 
 <script>
-let conversations={}, activeNumber=null, currentFilter='all', currentLang='en', authToken='';
+let conversations={}, activeNumber=null, currentFilter='all', currentLang='en';
+let authToken=localStorage.getItem('glamly_token')||'';
 
 const quickReplies={
   en:['Please share your booking ID so I can help you.','Cancellations made 24hrs before appointment are fully refunded.','Your refund will be processed within 3-5 business days.','Thank you for choosing Glamly! Have a beautiful day 💜'],
@@ -400,9 +359,8 @@ async function doLogin(){
   const data=await res.json();
   if(data.success){
     authToken=data.token;
-    document.getElementById('loginScreen').style.display='none';
-    document.getElementById('app').style.display='flex';
-    loadConversations();
+    localStorage.setItem('glamly_token',authToken);
+    showApp();
   } else {
     document.getElementById('loginErr').textContent='Wrong password · كلمة مرور خاطئة';
   }
@@ -411,11 +369,20 @@ async function doLogin(){
 async function doLogout(){
   await fetch('/logout',{method:'POST'});
   authToken='';
+  localStorage.removeItem('glamly_token');
   document.getElementById('app').style.display='none';
   document.getElementById('loginScreen').style.display='flex';
 }
 
-function authHeaders(){return{Authorization:'Bearer '+authToken,'Content-Type':'application/json'}}
+function showApp(){
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('app').style.display='flex';
+  loadConversations();
+}
+
+function authHeaders(){
+  return{Authorization:'Bearer '+authToken,'Content-Type':'application/json'};
+}
 
 function setLang(lang){
   currentLang=lang;
@@ -433,8 +400,10 @@ function setFilter(f,btn){
 
 function timeAgo(iso){
   const d=Math.floor((Date.now()-new Date(iso))/1000);
-  if(d<60) return d+'s'; if(d<3600) return Math.floor(d/60)+'m';
-  if(d<86400) return Math.floor(d/3600)+'h'; return Math.floor(d/86400)+'d';
+  if(d<60) return d+'s';
+  if(d<3600) return Math.floor(d/60)+'m';
+  if(d<86400) return Math.floor(d/3600)+'h';
+  return Math.floor(d/86400)+'d';
 }
 
 function renderList(){
@@ -454,7 +423,14 @@ function renderList(){
     const div=document.createElement('div');
     div.className='conv-item'+(number===activeNumber?' active':'');
     const badgeText=data.status==='pending'?(currentLang==='ar'?'انتظار':'Pending'):data.status==='bot'?(currentLang==='ar'?'بوت':'Bot'):(currentLang==='ar'?'محلول':'Resolved');
-    div.innerHTML=\`<div class="conv-top"><span class="conv-num">\${number.replace('whatsapp:+','')}</span><span class="conv-time">\${timeAgo(data.lastSeen)}</span></div><div class="conv-prev">\${preview}</div><span class="badge \${data.status}">\${badgeText}</span>\`;
+    div.innerHTML=\`
+      <div class="conv-top">
+        <span class="conv-num">\${number.replace('whatsapp:+','')}</span>
+        <span class="conv-time">\${timeAgo(data.lastSeen)}</span>
+      </div>
+      <div class="conv-prev">\${preview}</div>
+      <span class="badge \${data.status}">\${badgeText}</span>
+    \`;
     div.onclick=()=>openConversation(number);
     list.appendChild(div);
   }
@@ -473,7 +449,10 @@ function openConversation(number){
     <div class="chat-head">
       <div class="ch-left">
         <div class="avatar">\${num.slice(-2)}</div>
-        <div><div class="ch-name">+\${num}</div><div class="ch-sub">Status: \${data.status} · \${timeAgo(data.lastSeen)} ago</div></div>
+        <div>
+          <div class="ch-name">+\${num}</div>
+          <div class="ch-sub">Status: \${data.status} · \${timeAgo(data.lastSeen)} ago</div>
+        </div>
       </div>
       <div class="ch-actions">
         <button class="act-btn" onclick="lookupBooking()">\${isAr?'بحث عن حجز':'Booking lookup'}</button>
@@ -485,16 +464,24 @@ function openConversation(number){
       \${data.messages.map(m=>\`
         <div class="msg-wrap \${m.from==='customer'?'left':'right'}">
           <div class="msg \${m.from} \${isAr?'ar':''}">\${m.message}</div>
-          <div class="msg-meta">\${m.from==='customer'?(isAr?'العميل':'Customer'):m.from==='bot'?'Bot':(isAr?'موظف':'Agent')} · \${new Date(m.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>
+          <div class="msg-meta">
+            \${m.from==='customer'?(isAr?'العميل':'Customer'):m.from==='bot'?'Bot':(isAr?'موظف':'Agent')}
+            · \${new Date(m.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+          </div>
         </div>
       \`).join('')}
     </div>
     <div class="quick-replies">
       <div class="qr-label">\${isAr?'ردود سريعة:':'Quick replies:'}</div>
-      \${quickReplies[currentLang].map(q=>\`<button class="qr \${isAr?'ar':''}" onclick="setReply(this.textContent)">\${q}</button>\`).join('')}
+      \${quickReplies[currentLang].map(q=>\`
+        <button class="qr \${isAr?'ar':''}" onclick="setReply(this.textContent)">\${q}</button>
+      \`).join('')}
     </div>
     <div class="reply-box">
-      <textarea id="replyInput" placeholder="\${isAr?'اكتب ردك...':'Type your reply...'}" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendReply()}"></textarea>
+      <textarea id="replyInput"
+        placeholder="\${isAr?'اكتب ردك...':'Type your reply...'}"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendReply()}">
+      </textarea>
       <button class="send-btn" onclick="sendReply()">\${isAr?'إرسال':'Send'}</button>
     </div>
   \`;
@@ -502,20 +489,31 @@ function openConversation(number){
   renderList();
 }
 
-function setReply(text){const i=document.getElementById('replyInput');if(i)i.value=text}
+function setReply(text){
+  const i=document.getElementById('replyInput');
+  if(i) i.value=text;
+}
 
 async function sendReply(){
   const input=document.getElementById('replyInput');
   const message=input.value.trim();
   if(!message||!activeNumber) return;
   input.value='';
-  await fetch('/reply',{method:'POST',headers:authHeaders(),body:JSON.stringify({to:activeNumber.replace('whatsapp:+',''),message})});
+  await fetch('/reply',{
+    method:'POST',
+    headers:authHeaders(),
+    body:JSON.stringify({to:activeNumber.replace('whatsapp:+',''),message})
+  });
   await loadConversations();
   openConversation(activeNumber);
 }
 
 async function markResolved(number){
-  await fetch('/status',{method:'POST',headers:authHeaders(),body:JSON.stringify({number,status:'resolved'})});
+  await fetch('/status',{
+    method:'POST',
+    headers:authHeaders(),
+    body:JSON.stringify({number,status:'resolved'})
+  });
   await loadConversations();
   if(activeNumber===number) openConversation(number);
 }
@@ -526,22 +524,47 @@ async function lookupBooking(){
   const res=await fetch('/booking/'+bookingId,{headers:authHeaders()});
   const data=await res.json();
   const msgs=document.getElementById('messages');
+  if(!msgs) return;
   const card=document.createElement('div');
   card.className='msg-wrap left';
-  card.innerHTML=\`<div class="booking-card"><h4>Booking #\${data.id}</h4><table><tr><td>Customer</td><td>\${data.customer}</td></tr><tr><td>Service</td><td>\${data.service}</td></tr><tr><td>Date</td><td>\${data.date}</td></tr><tr><td>Status</td><td>\${data.status}</td></tr></table></div>\`;
+  card.innerHTML=\`
+    <div class="booking-card">
+      <h4>Booking #\${data.id}</h4>
+      <table>
+        <tr><td>Customer</td><td>\${data.customer}</td></tr>
+        <tr><td>Service</td><td>\${data.service}</td></tr>
+        <tr><td>Date</td><td>\${data.date}</td></tr>
+        <tr><td>Status</td><td>\${data.status}</td></tr>
+      </table>
+    </div>
+  \`;
   msgs.appendChild(card);
   msgs.scrollTop=99999;
 }
 
 async function loadConversations(){
   if(!authToken) return;
-  const res=await fetch('/conversations',{headers:authHeaders()});
-  if(res.status===401){doLogout();return}
-  conversations=await res.json();
-  renderList();
+  try {
+    const res=await fetch('/conversations',{headers:authHeaders()});
+    if(res.status===401){
+      doLogout();
+      return;
+    }
+    conversations=await res.json();
+    renderList();
+    if(activeNumber&&conversations[activeNumber]){
+      openConversation(activeNumber);
+    }
+  } catch(err){
+    console.error('Failed to load conversations:', err);
+  }
 }
 
-setInterval(()=>{if(authToken)loadConversations()},8000);
+if(authToken){
+  showApp();
+} 
+
+setInterval(()=>{if(authToken) loadConversations();}, 8000);
 </script>
 </body>
 </html>`);
