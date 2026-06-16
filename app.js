@@ -50,8 +50,19 @@ async function connectDB() {
   } catch (err) {
     console.error("Database connection failed:", err.message);
     process.exit(1);
-  }
-}
+ }
+ await db.execute(`
+  CREATE TABLE IF NOT EXISTS gifts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    gift_code VARCHAR(20) UNIQUE NOT NULL,
+    sender_name VARCHAR(100) NOT NULL,
+    recipient_phone VARCHAR(20) NOT NULL,
+    service_name VARCHAR(200) NOT NULL,
+    salon_name VARCHAR(200) NOT NULL,
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`); 
 connectDB();
 
 function requireAuth(req, res, next) {
@@ -208,7 +219,152 @@ app.post("/send-gift", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+app.post("/create-gift", async (req, res) => {
+  const { senderName, recipientPhone, serviceName, salonName, language } = req.body;
+  
+  const giftCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+  const giftLink = `https://glamly-webhook-production.up.railway.app/gift/${giftCode}`;
 
+  try {
+    await db.execute(
+      `INSERT INTO gifts (gift_code, sender_name, recipient_phone, service_name, salon_name)
+       VALUES (?, ?, ?, ?, ?)`,
+      [giftCode, senderName, recipientPhone, serviceName, salonName]
+    );
+
+    const templateSid = language === "ar"
+      ? process.env.TEMPLATE_SID_AR
+      : process.env.TEMPLATE_SID_EN;
+
+    await client.messages.create({
+      from: fromNumber,
+      to: `whatsapp:+${recipientPhone}`,
+      content_sid: templateSid,
+      content_variables: JSON.stringify({
+        "1": senderName,
+        "2": serviceName,
+        "3": salonName,
+        "4": giftLink
+      })
+    });
+app.get("/gift/:code", async (req, res) => {
+  const { code } = req.params;
+
+  try {
+    const [rows] = await db.execute(
+      `SELECT * FROM gifts WHERE gift_code = ?`,
+      [code]
+    );
+
+    if (rows.length === 0) {
+      return res.send(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>body{background:#0F0A28;color:#E8DEFF;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center}</style>
+</head><body><h2>هذه الهدية غير موجودة</h2><p>Gift not found</p></body></html>`);
+    }
+
+    const gift = rows[0];
+
+    res.send(`<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glamly – هديتكِ بانتظارك</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Naskh Arabic',sans-serif;background:#0F0A28;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#1E1040;border-radius:24px;padding:36px 28px;max-width:380px;width:100%;text-align:center}
+.brand{color:#E8DEFF;font-size:24px;font-weight:700;letter-spacing:4px;font-family:sans-serif}
+.tagline{color:#C8A84B;font-size:11px;font-family:sans-serif;margin-bottom:24px}
+.gift-emoji{font-size:64px;margin:16px 0}
+.from{color:#9F7FEA;font-size:14px;margin-bottom:6px}
+.from span{color:#C8A84B;font-weight:700}
+h1{color:#FFFFFF;font-size:22px;margin-bottom:20px;line-height:1.5}
+.divider{width:80%;height:1px;background:#2D1B6E;margin:20px auto}
+.detail-box{background:#2D1B6E;border-radius:14px;padding:16px;margin-bottom:20px;text-align:right}
+.detail-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #3D2580}
+.detail-row:last-child{border-bottom:none}
+.detail-label{color:#9F7FEA;font-size:13px}
+.detail-value{color:#E8DEFF;font-size:14px;font-weight:600}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px;border-radius:14px;font-size:16px;font-weight:700;text-decoration:none;margin-bottom:12px;transition:opacity 0.2s;font-family:'Noto Naskh Arabic',sans-serif}
+.btn:hover{opacity:0.9}
+.btn-main{background:#C8A84B;color:#0F0A28}
+.btn-apple{background:#FFFFFF;color:#000000;font-size:14px}
+.btn-android{background:#1D9E75;color:#FFFFFF;font-size:14px}
+.status{display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;margin-bottom:16px}
+.status.pending{background:#C8A84B22;color:#C8A84B;border:1px solid #C8A84B}
+.status.used{background:#1D9E7522;color:#1D9E75;border:1px solid #1D9E75}
+.footer{color:#3D2870;font-size:11px;margin-top:20px;font-family:sans-serif}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="brand">GLAMLY</div>
+  <div class="tagline">where beauty made ease</div>
+  
+  <div class="gift-emoji">🎁</div>
+  
+  <div class="from">أهدتكِ <span>${gift.sender_name}</span> هدية مميزة!</div>
+  <h1>تجربة تجميل فاخرة بانتظاركِ ✨</h1>
+  
+  <span class="status ${gift.status === 'used' ? 'used' : 'pending'}">
+    ${gift.status === 'used' ? '✅ تم الاستخدام' : '🎀 لم تُستخدم بعد'}
+  </span>
+
+  <div class="divider"></div>
+
+  <div class="detail-box">
+    <div class="detail-row">
+      <span class="detail-value">${gift.service_name}</span>
+      <span class="detail-label">✨ الخدمة</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-value">${gift.salon_name}</span>
+      <span class="detail-label">📍 المكان</span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-value">${new Date(gift.created_at).toLocaleDateString('ar-SA')}</span>
+      <span class="detail-label">📅 تاريخ الهدية</span>
+    </div>
+  </div>
+
+  <a href="glamly://gift/${gift.gift_code}" class="btn btn-main">
+    🗓️ احجزي موعدكِ الآن
+  </a>
+
+  <p style="color:#534AB7;font-size:12px;margin-bottom:12px">
+    إذا لم يكن التطبيق مثبتاً لديكِ، حمّليه من هنا:
+  </p>
+
+  <a href="${process.env.APPLE_STORE_URL || 'https://apps.apple.com'}" class="btn btn-apple">
+    🍎 App Store
+  </a>
+  <a href="${process.env.GOOGLE_PLAY_URL || 'https://play.google.com'}" class="btn btn-android">
+    🤖 Google Play
+  </a>
+
+  <div class="footer">Glamly – حيث يصبح الجمال أمراً سهلاً</div>
+</div>
+
+<script>
+  setTimeout(function(){
+    window.location.href = "glamly://gift/${gift.gift_code}";
+  }, 500);
+</script>
+</body>
+</html>`);
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+    res.json({ success: true, giftCode, giftLink });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 app.get("/dashboard", (req, res) => {
   res.send(`<!DOCTYPE html>
 <html lang="en">
