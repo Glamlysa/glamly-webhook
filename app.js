@@ -224,7 +224,7 @@ app.post("/send-gift", async (req, res) => {
 app.post("/create-gift", async (req, res) => {
   const { senderName, recipientPhone, serviceName, salonName, language } = req.body;
   const giftCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-  const giftLink = `https://glamly-webhook-production.up.railway.app/gift`;
+const giftLink = `https://gift.glamlysa.com/gift`;
   const templateSid = language === "ar" ? process.env.TEMPLATE_SID_AR : process.env.TEMPLATE_SID_EN;
   try {
     await db.execute(
