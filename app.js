@@ -250,7 +250,6 @@ const giftLink = `https://gift.glamlysa.com/gift`;
 });
 
 app.get("/gift", (req, res) => {
-  const code = req.query.code || '';
   res.send(`<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -267,8 +266,8 @@ body{font-family:'Noto Naskh Arabic',sans-serif;background:#0F0A28;min-height:10
 .gift-emoji{font-size:64px;margin:16px 0}
 h1{color:#FFFFFF;font-size:20px;margin-bottom:10px;line-height:1.5}
 p{color:#9F7FEA;font-size:14px;margin-bottom:24px;line-height:1.7}
-input{width:100%;padding:14px;border-radius:12px;border:1px solid #3D2580;background:#2D1B6E;color:#E8DEFF;font-size:18px;text-align:center;font-family:'Noto Naskh Arabic',sans-serif;outline:none;letter-spacing:4px;margin-bottom:12px}
-input::placeholder{color:#534AB7;letter-spacing:0}
+input{width:100%;padding:14px;border-radius:12px;border:1px solid #3D2580;background:#2D1B6E;color:#E8DEFF;font-size:16px;text-align:center;direction:ltr;outline:none;margin-bottom:12px}
+input::placeholder{color:#534AB7}
 .btn{display:block;width:100%;padding:16px;border-radius:14px;font-size:16px;font-weight:700;text-decoration:none;margin-bottom:12px;cursor:pointer;border:none;font-family:'Noto Naskh Arabic',sans-serif}
 .btn-main{background:#C8A84B;color:#0F0A28}
 .footer{color:#3D2870;font-size:11px;margin-top:20px;font-family:sans-serif}
@@ -277,28 +276,48 @@ input::placeholder{color:#534AB7;letter-spacing:0}
 <body>
 <div class="card">
   <div class="brand">GLAMLY</div>
-  <div class="tagline">where beauty made ease</div>
+  <div class="tagline">جمالكِ بكل سهولة</div>
   <div class="gift-emoji">🎁</div>
-  <h1>أدخلي رمز هديتكِ</h1>
-  <p>ستجدين الرمز في رسالة WhatsApp التي وصلتكِ</p>
-  <input type="text" id="codeInput" placeholder="مثال: ABC12345" maxlength="8" oninput="this.value=this.value.toUpperCase()">
-  <button class="btn btn-main" onclick="openGift()">🎀 عرض هديتكِ</button>
-  <div class="footer">Glamly – حيث يصبح الجمال أمراً سهلاً</div>
+  <h1>أدخلي رقم جوالكِ لعرض هديتكِ</h1>
+  <p>سنتعرف على هديتكِ برقم الجوال الذي استلمتِ عليه الرسالة</p>
+  <input type="tel" id="phoneInput" placeholder="05XXXXXXXX" maxlength="10">
+  <button class="btn btn-main" onclick="openGift()">🎀 عرض هديتي</button>
+  <div class="footer">Glamly – جمالكِ بكل سهولة</div>
 </div>
 <script>
-  const preCode = "${code}";
-  if(preCode){
-    document.getElementById('codeInput').value = preCode;
-    window.location.href = '/gift/' + preCode;
-  }
   function openGift(){
-    const code = document.getElementById('codeInput').value.trim();
-    if(!code){ alert('من فضلكِ أدخلي الرمز'); return; }
-    window.location.href = '/gift/' + code;
+    let phone = document.getElementById('phoneInput').value.trim();
+    if(!phone){ alert('من فضلكِ أدخلي رقم جوالكِ'); return; }
+    phone = phone.replace(/^0/, '966');
+    window.location.href = '/gift/by-phone/' + phone;
   }
-  document.getElementById('codeInput').addEventListener('keydown', function(e){
+  document.getElementById('phoneInput').addEventListener('keydown', function(e){
     if(e.key === 'Enter') openGift();
   });
+</script>
+</body>
+</html>`);
+});
+
+app.get("/gift/by-phone/:phone", async (req, res) => {
+  const { phone } = req.params;
+  try {
+    const [rows] = await db.execute(
+      `SELECT * FROM gifts WHERE recipient_phone = ? ORDER BY created_at DESC LIMIT 1`,
+      [phone]
+    );
+    if (rows.length === 0) {
+      return res.send(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>body{background:#0F0A28;color:#E8DEFF;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;flex-direction:column;gap:16px}</style>
+</head><body><div style="font-size:48px">😔</div><h2>لم نجد هدية بهذا الرقم</h2></body></html>`);
+    }
+    const gift = rows[0];
+    res.redirect(`/gift/${gift.gift_code}`);
+  } catch (err) {
+    res.status(500).send("Error");
+  }
+});
 </script>
 </body>
 </html>`);
